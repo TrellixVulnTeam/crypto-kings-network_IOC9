@@ -3,11 +3,10 @@ from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-
 import sqlite3
 from sqlite3 import Error
-
 import time
+from random import random
 
 """
 Database
@@ -87,6 +86,9 @@ class Database:
         for k, v in sql_lookup.items():
             table_check(self.cur, k, v)
 
+        self.seed()
+        """seed"""
+
     def create_table(self, name, create_table_sql):
         """ create a table from the create_table_sql statement
         :param name: Name of table
@@ -107,18 +109,19 @@ class Database:
         cols_query = ' AND '.join([col + '=?' for col in data.keys()])
         cols = tuple(data.keys()) if len(data.keys()) > 1 else f'("{list(data.keys())[0]}")'
         vals = tuple(data.values()) if len(data.values()) > 1 else f'("{list(data.values())[0]}")'
-        print(f'SELECT * FROM {table} WHERE ({cols_query})', vals)
-
-        print(cols, vals)
 
         self.cur.execute(f'SELECT * FROM {table} WHERE ({cols_query})', tuple(data.values()))
         entry = self.cur.fetchone()
 
         if entry is None:
-            print(f'INSERT INTO {table} {cols} VALUES {vals}')
-            self.cur.execute(f'INSERT INTO {table} {cols} VALUES {vals}')
-            print('New entry added')
-            self.conn.commit()
+
+            try:
+                self.cur.execute(f'INSERT INTO {table} {cols} VALUES {vals}')
+                print('New entry added')
+                self.conn.commit()
+            except Error as e:
+                print(e)
+
         else:
             print('Entry found')
 
@@ -149,7 +152,7 @@ class Crawler:
         self.driver.set_window_size(1440, 900)
         """c"""
 
-        self.wait_time = 1   # TODO call this rate_limit and make it dynamic
+        self.wait_time = 1  # TODO call this rate_limit and make it dynamic
         """c"""
 
         self.base_url = 'https://bscscan.com'
@@ -161,9 +164,12 @@ class Crawler:
     def get_top_coins(self, holder_address):
         """Get the top coins"""
 
-        self.driver.get(f'{self.base_url}/address/{holder_address}')
+        self.db.cur.execute(f'''SELECT id FROM holders WHERE (address="{holder_address}")''')
+        holder_id = self.db.cur.fetchone()[0]
 
-        time.sleep(self.wait_time)
+        self.driver.get(f'{self.base_url}/address/{holder_address.strip()}')
+
+        time.sleep(self.wait_time + random())
 
         element = self.driver.find_element_by_id("availableBalanceDropdown")
 
@@ -176,27 +182,39 @@ class Crawler:
         coin_list = soup.find_all('li', class_="list-custom list-custom-BEP-20")
 
         for item in coin_list:
-            print(item.text)
+            # VERY SHOTTY
+            _temp = item.text.split(')')[0].split('(')
+            _name = _temp[0].strip()
+            _symbol = _temp[-1]
+
             for a in item.find_all('a', href=True):
-                print("Found the URL:", a['href'])
+                # print("Found the URL:", a['href'])
                 coin_address = a['href'].replace('/token/', '').split('?a=')[0]
-                print(coin_address, '!!!!!!!!!!!')
-                self.db.add_data('coins', {'address': coin_address})
+
+                self.db.add_data('coins', {'address': coin_address,
+                                           'name': _name,
+                                           'symbol': _symbol})
+
+                self.db.cur.execute(f'''SELECT id FROM coins WHERE (address="{coin_address}")''')
+                coin_id = self.db.cur.fetchone()[0]
+
+                self.db.add_data('data', {'coin_id': coin_id,
+                                          'holder_id': holder_id,
+                                          'amount': 100,
+                                          'timestamp': time.time()})
 
     def get_top_holders(self, coin_address):
         """Get the top holders"""
 
         # get coin id
-        print(coin_address)
         self.db.cur.execute(f'''SELECT id FROM coins WHERE (address="{coin_address}")''')
         coin_id = self.db.cur.fetchone()[0]
-        print(coin_id)
 
-        print(f'{self.base_url}/{coin_address}#balances')
+        # print(f'{self.base_url}/{coin_address}#balances')
 
         self.driver.get(f'{self.base_url}/token/{coin_address}#balances')
 
-        time.sleep(self.wait_time)
+        time.sleep(self.wait_time + random())
 
         iframe = self.driver.find_element(By.ID, 'tokeholdersiframe')
 
@@ -221,13 +239,11 @@ class Crawler:
             if int(percent) > self.percent_threshold:
                 continue
 
-            self.db.add_data('holders', {'address': address})
+            self.db.add_data('holders', {'address': address.strip()})
 
             # get holder id
-            print(address, '00000000')
             self.db.cur.execute(f'''SELECT id FROM holders WHERE (address="{address}")''')
             holder_id = self.db.cur.fetchone()[0]
-            print(holder_id)
 
             self.db.add_data('data', {'coin_id': coin_id,
                                       'holder_id': holder_id,
@@ -235,35 +251,36 @@ class Crawler:
                                       'percent': percent,
                                       'timestamp': time.time()})
 
-            # address.append(td_tags[1].text)
-            # percent.append(td_tags[3].text)
-            # value.append(td_tags[4].text)
-            # self.add_data('data')
-
     def run(self):
         """x"""
-
-        # get next coin
-        self.db.cur.execute(f'SELECT address FROM coins WHERE (refresh=1)')
-        entry = self.db.cur.fetchall()
-        if entry is not None:
-            for each in entry:
-                print('=', each)
-                self.get_top_holders(each[0])
-                self.db.cur.execute(f""" Update coins set refresh=0 where address='{each[0]}' """)
-        else:
-            print('No coins')
 
         # get next holder
         self.db.cur.execute(f'SELECT address FROM holders WHERE (refresh=1)')
         entry = self.db.cur.fetchall()
         if entry is not None:
-            for each in entry:
-                print(each)
-                self.get_top_coins(each[0])
-                self.db.cur.execute(f""" Update holders set refresh=0 where address='{each[0]}' """)
+            for each in entry[:10]:
+                try:
+                    self.get_top_coins(each[0])
+                    self.db.cur.execute(f""" Update holders set refresh=0 where address='{each[0]}' """)
+                except Error as e:
+                    print(e)
+                    self.db.cur.execute(f""" Update holders set refresh=-1 where address='{each[0]}' """)
         else:
             print('No holders')
+
+        # get next coin
+        self.db.cur.execute(f'SELECT address FROM coins WHERE (refresh=1)')
+        entry = self.db.cur.fetchall()
+        if entry is not None:
+            for each in entry[:10]:
+                try:
+                    self.get_top_holders(each[0])
+                    self.db.cur.execute(f""" Update coins set refresh=0 where address='{each[0]}' """)
+                except Error as e:
+                    print(e)
+                    self.db.cur.execute(f""" Update coins set refresh=-1 where address='{each[0]}' """)
+        else:
+            print('No coins')
 
         self.db.conn.commit()
 
@@ -280,9 +297,6 @@ def main():
     """main"""
 
     database = Database("crypto_kings.db")
-
-    # seed
-    database.seed()
 
     crawler = Crawler(database)
 
