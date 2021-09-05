@@ -8,6 +8,11 @@ from sqlite3 import Error
 import time
 from random import random
 
+from webdriver_manager.chrome import ChromeDriverManager
+
+#driver = webdriver.Chrome(ChromeDriverManager().install())
+
+
 """
 Database
 """
@@ -127,7 +132,8 @@ class Database:
 
     def seed(self):
         """seed"""
-        coin = {'address': '0x2a0f5257f4bfe6c75cd58a14a0e7c4651e2160de'}
+        #coin = {'address': '0x2a0f5257f4bfe6c75cd58a14a0e7c4651e2160de'}
+        coin = {'address': '0xb6c53431608e626ac81a9776ac3e999c5556717c'}
         self.add_data('coins', coin)
 
 
@@ -145,8 +151,10 @@ class Crawler:
         chrome_options = Options()
         chrome_options.add_argument("--headless")
 
-        self.driver = webdriver.Chrome('C:\\Program Files\\chromedriver_win32\\chromedriver.exe',
-                                       options=chrome_options)
+        # self.driver = webdriver.Chrome('C:\\Program Files\\chromedriver_win32\\chromedriver.exe',
+        #                                options=chrome_options)
+
+        self.driver = webdriver.Chrome(ChromeDriverManager().install())
         """c"""
 
         self.driver.set_window_size(1440, 900)
